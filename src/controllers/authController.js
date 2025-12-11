@@ -2,7 +2,7 @@ const bcrypt = require('bcryptjs');
 const { query } = require('../db');
 
 // ---------------------------------------------
-// REGISTER (بسيط – يرجع user فقط بدون توكنات)
+// REGISTER (simple)
 // ---------------------------------------------
 async function register(req, res) {
   const { name, email, password, language } = req.body;
@@ -27,7 +27,6 @@ async function register(req, res) {
 
   const user = result.rows[0];
 
-  // 👈 هذا هو الشكل الذي يتوقعه الفرونت
   return res.status(201).json({
     id: user.id,
     name: user.name,
@@ -39,7 +38,7 @@ async function register(req, res) {
 }
 
 // ---------------------------------------------
-// LOGIN (يرجع user فقط – بدون توكن – بدون كعكات)
+// LOGIN (simple, no tokens)
 // ---------------------------------------------
 async function login(req, res) {
   const { email, password } = req.body;
@@ -51,16 +50,11 @@ async function login(req, res) {
 
   const user = result.rows[0];
 
-  if (!user) {
-    return res.status(401).json({ message: 'Invalid credentials' });
-  }
+  if (!user) return res.status(401).json({ message: 'Invalid credentials' });
 
   const ok = await bcrypt.compare(password, user.password_hash);
-  if (!ok) {
-    return res.status(401).json({ message: 'Invalid credentials' });
-  }
+  if (!ok) return res.status(401).json({ message: 'Invalid credentials' });
 
-  // 👈 فقط أرجع بيانات المستخدم كما يتوقعها الفرونت
   return res.json({
     id: user.id,
     name: user.name,
@@ -71,9 +65,14 @@ async function login(req, res) {
   });
 }
 
-// --------------------------------------------------
-// نترك الدوال الباقية كما هي بدون تعديل
-// --------------------------------------------------
+// ---------------------------------------------
+// REFRESH — disabled but must exist for backend
+// ---------------------------------------------
+function refresh(req, res) {
+  return res.json({ message: "Refresh not used in simple auth mode" });
+}
+
+// ---------------------------------------------
 async function me(req, res) {
   const result = await query(
     'SELECT id, name, email, role, avatar_url, language, is_active FROM users WHERE id=$1',
@@ -91,15 +90,13 @@ async function updateProfile(req, res) {
   if (name) { fields.push(`name=$${idx++}`); values.push(name); }
   if (language) { fields.push(`language=$${idx++}`); values.push(language); }
   if (avatar_url) { fields.push(`avatar_url=$${idx++}`); values.push(avatar_url); }
-  if (password) { 
+  if (password) {
     const hash = await bcrypt.hash(password, 10);
-    fields.push(`password_hash=$${idx++}`); 
-    values.push(hash); 
+    fields.push(`password_hash=$${idx++}`);
+    values.push(hash);
   }
 
-  if (!fields.length) {
-    return res.json({ message: 'Nothing to update' });
-  }
+  if (!fields.length) return res.json({ message: 'Nothing to update' });
 
   values.push(req.user.id);
 
@@ -113,4 +110,4 @@ async function updateProfile(req, res) {
   return res.json(result.rows[0]);
 }
 
-module.exports = { register, login, me, updateProfile };
+module.exports = { register, login, refresh, me, updateProfile };
