@@ -2,11 +2,11 @@
   "name": "cafe-pos-backend",
   "version": "1.0.0",
   "description": "Cafe POS backend using Node.js, Express, PostgreSQL, JWT, and bcrypt.",
-  "main": "src/app.js",
+  "main": "server.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node src/app.js",
-    "dev": "set NODE_ENV=development && node src/app.js"
+    "start": "node server.js",
+    "dev": "NODE_ENV=development node server.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
