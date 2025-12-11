@@ -4,7 +4,7 @@ const { authMiddleware, roleMiddleware } = require('../middleware/auth');
 
 const router = express.Router();
 
-router.get('/tables', authMiddleware, roleMiddleware(['employee', 'admin']), listTables);
-router.put('/tables/:id', authMiddleware, roleMiddleware(['employee', 'admin']), updateTable);
+router.get('/tables', listTables);
+router.put('/tables/:id', updateTable);
 
 module.exports = router;

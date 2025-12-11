@@ -7,8 +7,8 @@ const router = express.Router();
 router.get('/categories', listCategories);
 router.get('/products', listProducts);
 router.get('/products/:id', getProduct);
-router.post('/products', authMiddleware, roleMiddleware(['admin']), createProduct);
-router.put('/products/:id', authMiddleware, roleMiddleware(['admin']), updateProduct);
-router.delete('/products/:id', authMiddleware, roleMiddleware(['admin']), deleteProduct);
+router.post('/products', createProduct);
+router.put('/products/:id',updateProduct);
+router.delete('/products/:id', deleteProduct);
 
 module.exports = router;
