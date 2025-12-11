@@ -20,7 +20,7 @@ app.use(express.json());
 app.use(cookieParser());
 app.use('/uploads', express.static(path.join(process.cwd(), process.env.UPLOAD_DIR || 'uploads')));
 
-app.use('/auth', authRoutes);   
+app.use('/api/auth', authRoutes);  
 app.use('/api', menuRoutes);
 app.use('/api', orderRoutes);
 app.use('/api', tableRoutes);
