@@ -1,13 +1,14 @@
 const express = require('express');
-const { register, login, refresh, me,  } = require('../controllers/authController');
-const { authMiddleware } = require('../middleware/auth');
+const { register, login, refresh } = require('../controllers/authController');
 
 const router = express.Router();
+
+/**
+ * AUTH ROUTES (simple auth – no tokens, no middleware)
+ */
 
 router.post('/register', register);
 router.post('/login', login);
 router.post('/refresh', refresh);
-router.get('/me', authMiddleware, me);
-
 
 module.exports = router;
