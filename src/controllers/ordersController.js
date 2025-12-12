@@ -3,6 +3,11 @@ const { query } = require('../db');
 /* =========================
    Helpers
 ========================= */
+function toInt(value) {
+  const n = Number(value);
+  return Number.isInteger(n) ? n : null;
+}
+
 async function calculateItem(product, extras = []) {
   const extrasTotal = extras.reduce(
     (sum, ex) => sum + Number(ex.price || 0),
@@ -31,18 +36,19 @@ async function createOrder(req, res) {
       return res.status(400).json({ message: 'Items required' });
     }
 
-    // Normalize product IDs
-    const productIds = items.map(
-      (i) => i.productId || i.product_id
-    );
+    const productIds = items.map(i =>
+      toInt(i.productId || i.product_id)
+    ).filter(Boolean);
 
-    // Fetch products
+    if (!productIds.length) {
+      return res.status(400).json({ message: 'Invalid products' });
+    }
+
     const productsRes = await query(
       'SELECT * FROM products WHERE id = ANY($1)',
       [productIds]
     );
 
-    // Fetch extras
     const extrasRes = await query(
       'SELECT * FROM product_extras WHERE product_id = ANY($1)',
       [productIds]
@@ -58,27 +64,24 @@ async function createOrder(req, res) {
     const orderItemsPayload = [];
 
     for (const item of items) {
-      const productId = item.productId || item.product_id;
-      const quantity = item.qty || item.quantity || 1;
+      const productId = toInt(item.productId || item.product_id);
+      const quantity = toInt(item.qty || item.quantity || 1);
 
-      const product = productsRes.rows.find(
-        (p) => p.id === Number(productId)
-      );
+      if (!productId || !quantity) {
+        return res.status(400).json({ message: 'Invalid item data' });
+      }
 
+      const product = productsRes.rows.find(p => p.id === productId);
       if (!product) {
-        return res
-          .status(400)
-          .json({ message: `Invalid product ${productId}` });
+        return res.status(400).json({ message: `Invalid product ${productId}` });
       }
 
       const availableExtras = extrasByProduct[product.id] || [];
-
       const selectedExtras = (item.extras || [])
-        .map((id) => availableExtras.find((e) => e.id === id))
+        .map(id => availableExtras.find(e => e.id === toInt(id)))
         .filter(Boolean);
 
       const { final } = await calculateItem(product, selectedExtras);
-
       const lineTotal = final * quantity;
       subtotal += lineTotal;
 
@@ -94,17 +97,15 @@ async function createOrder(req, res) {
     const vat = subtotal * 0.15;
     const total = subtotal + vat;
 
-    // Create order
     const orderRes = await query(
       `INSERT INTO orders
         (user_id, cashier_id, table_id, status, type, payment_method, subtotal, vat, total, note)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       VALUES ($1,$2,$3,'PENDING',$4,$5,$6,$7,$8,$9)
        RETURNING *`,
       [
-        user_id || null,
-        cashier_id || null,
-        table_id || null,
-        'PENDING',
+        toInt(user_id),
+        toInt(cashier_id),
+        toInt(table_id),
         type,
         payment_method || null,
         subtotal,
@@ -116,11 +117,11 @@ async function createOrder(req, res) {
 
     const order = orderRes.rows[0];
 
-    // Insert order items
     for (const item of orderItemsPayload) {
       await query(
         `INSERT INTO order_items
-          (order_id, product_id, product_name_snapshot, quantity, base_price_snapshot, extras_snapshot, final_price, item_notes)
+          (order_id, product_id, product_name_snapshot, quantity,
+           base_price_snapshot, extras_snapshot, final_price, item_notes)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
         [
           order.id,
@@ -139,6 +140,7 @@ async function createOrder(req, res) {
       orderId: order.id,
       total: order.total,
     });
+
   } catch (err) {
     console.error('Create order error:', err);
     return res.status(500).json({ message: 'Order failed' });
@@ -146,10 +148,14 @@ async function createOrder(req, res) {
 }
 
 /* =========================
-   READS (NO AUTH)
+   READS
 ========================= */
 async function myHistory(req, res) {
-  const { userId } = req.query;
+  const userId = toInt(req.query.userId);
+  if (!userId) {
+    return res.status(400).json({ message: 'Invalid user id' });
+  }
+
   const orders = await query(
     'SELECT * FROM orders WHERE user_id=$1 ORDER BY created_at DESC',
     [userId]
@@ -158,28 +164,50 @@ async function myHistory(req, res) {
 }
 
 async function getOrder(req, res) {
-  const { id } = req.params;
-  const order = await query('SELECT * FROM orders WHERE id=$1', [id]);
-  if (!order.rows.length) {
-    return res.status(404).json({ message: 'Order not found' });
+  try {
+    const orderId = toInt(req.params.id);
+    if (!orderId) {
+      return res.status(400).json({ message: 'Invalid order id' });
+    }
+
+    const order = await query(
+      'SELECT * FROM orders WHERE id=$1',
+      [orderId]
+    );
+
+    if (!order.rows.length) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    const items = await query(
+      'SELECT * FROM order_items WHERE order_id=$1',
+      [orderId]
+    );
+
+    return res.json({ ...order.rows[0], items: items.rows });
+
+  } catch (err) {
+    console.error('getOrder error:', err);
+    return res.status(500).json({ message: 'Server error' });
   }
-  const items = await query(
-    'SELECT * FROM order_items WHERE order_id=$1',
-    [id]
-  );
-  return res.json({ ...order.rows[0], items: items.rows });
 }
 
 async function activeOrders(req, res) {
   const orders = await query(
-    "SELECT * FROM orders WHERE status NOT IN ('COMPLETED','REJECTED') ORDER BY created_at DESC"
+    `SELECT * FROM orders
+     WHERE status NOT IN ('COMPLETED','REJECTED')
+     ORDER BY created_at DESC`
   );
   return res.json(orders.rows);
 }
 
 async function updateStatus(req, res) {
-  const { id } = req.params;
+  const orderId = toInt(req.params.id);
   const { status } = req.body;
+
+  if (!orderId) {
+    return res.status(400).json({ message: 'Invalid order id' });
+  }
 
   const timestamps = {
     ACCEPTED: 'accepted_at',
@@ -195,7 +223,7 @@ async function updateStatus(req, res) {
     fields.push(`${timestamps[status]}=NOW()`);
   }
 
-  values.push(id);
+  values.push(orderId);
 
   const sql = `
     UPDATE orders
@@ -213,12 +241,19 @@ async function updateStatus(req, res) {
 }
 
 async function rateOrder(req, res) {
-  const { id } = req.params;
+  const orderId = toInt(req.params.id);
   const { rating, rating_comment } = req.body;
 
+  if (!orderId) {
+    return res.status(400).json({ message: 'Invalid order id' });
+  }
+
   const result = await query(
-    'UPDATE orders SET rating=$1, rating_comment=$2 WHERE id=$3 RETURNING *',
-    [rating, rating_comment, id]
+    `UPDATE orders
+     SET rating=$1, rating_comment=$2
+     WHERE id=$3
+     RETURNING *`,
+    [rating, rating_comment, orderId]
   );
 
   if (!result.rows.length) {
@@ -229,24 +264,19 @@ async function rateOrder(req, res) {
 }
 
 async function listOrders(req, res) {
-  const { user_id } = req.query;
+  const userId = toInt(req.query.user_id);
 
-  let result;
-
-  if (user_id) {
-    result = await query(
-      'SELECT * FROM orders WHERE user_id=$1 ORDER BY created_at DESC',
-      [user_id]
-    );
-  } else {
-    result = await query(
-      'SELECT * FROM orders ORDER BY created_at DESC'
-    );
-  }
+  const result = userId
+    ? await query(
+        'SELECT * FROM orders WHERE user_id=$1 ORDER BY created_at DESC',
+        [userId]
+      )
+    : await query(
+        'SELECT * FROM orders ORDER BY created_at DESC'
+      );
 
   return res.json(result.rows);
 }
-
 
 module.exports = {
   createOrder,
