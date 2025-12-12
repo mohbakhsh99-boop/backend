@@ -117,14 +117,18 @@ async function updateUser(req, res) {
 }
 
 /* =========================
-   Update Profile (Customer)
+   Update Profile (Customer) ✅ FIXED
 ========================= */
 async function updateProfile(req, res) {
   try {
     const { userId, name, email, avatarUrl, currentPassword, newPassword, language } = req.body;
 
+    if (!userId) {
+      return res.status(400).json({ message: 'User ID required' });
+    }
+
     const userRes = await query(
-      'SELECT * FROM users WHERE id = $1',
+      'SELECT id, email, password_hash FROM users WHERE id = $1',
       [userId]
     );
 
@@ -134,40 +138,57 @@ async function updateProfile(req, res) {
 
     const user = userRes.rows[0];
 
+    const fields = [];
+    const values = [];
+    let idx = 1;
     let passwordChanged = false;
 
-    if (currentPassword && newPassword) {
-      const isMatch = await bcrypt.compare(
-        currentPassword,
-        user.password_hash
+    const add = (field, value) => {
+      fields.push(`${field} = $${idx++}`);
+      values.push(value);
+    };
+
+    if (name !== undefined) add('name', name);
+    if (avatarUrl !== undefined) add('avatar_url', avatarUrl);
+    if (language !== undefined) add('language', language);
+
+    if (email !== undefined && email !== '') {
+      const exists = await query(
+        'SELECT id FROM users WHERE email = $1 AND id <> $2',
+        [email, userId]
       );
+      if (exists.rows.length) {
+        return res.status(400).json({ message: 'Email already exists' });
+      }
+      add('email', email);
+    }
+
+    /* 🔐 Change password */
+    if (currentPassword && newPassword) {
+      const isMatch = await bcrypt.compare(currentPassword, user.password_hash);
 
       if (!isMatch) {
         return res.status(400).json({ message: 'invalidCurrentPassword' });
       }
 
       const newHash = await bcrypt.hash(newPassword, 10);
-
-      await query(
-        'UPDATE users SET password_hash = $1 WHERE id = $2',
-        [newHash, userId]
-      );
-
+      add('password_hash', newHash);
       passwordChanged = true;
     }
 
-    await query(
-      `
+    if (!fields.length) {
+      return res.json({ success: true, passwordChanged: false });
+    }
+
+    values.push(userId);
+
+    const sql = `
       UPDATE users
-      SET
-        name = COALESCE($1, name),
-        email = COALESCE($2, email),
-        avatar_url = COALESCE($3, avatar_url),
-        language = COALESCE($4, language)
-      WHERE id = $5
-      `,
-      [name, email, avatarUrl, language, userId]
-    );
+      SET ${fields.join(', ')}
+      WHERE id = $${idx}
+    `;
+
+    await query(sql, values);
 
     return res.json({
       success: true,
