@@ -2,6 +2,8 @@ const express = require('express');
 const {
   listCategories,
   createCategory,
+  updateCategory,
+  deleteCategory,
   listProducts,
   getProduct,
   createProduct,
@@ -15,7 +17,9 @@ const router = express.Router();
    Categories
 ========================= */
 router.get('/categories', listCategories);
-router.post('/categories', createCategory); // 👈 أضفناه
+router.post('/categories', createCategory);
+router.put('/categories/:id', updateCategory);     // ✅ كان ناقص
+router.delete('/categories/:id', deleteCategory);  // ✅ كان ناقص
 
 /* =========================
    Products

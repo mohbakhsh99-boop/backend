@@ -6,13 +6,18 @@ const { query } = require('../db');
 
 async function listCategories(req, res) {
   const result = await query(
-    'SELECT * FROM categories WHERE is_active = true ORDER BY id'
+    'SELECT * FROM categories ORDER BY id'
   );
   return res.json(result.rows);
 }
 
 async function createCategory(req, res) {
-  const { name_en, name_ar, is_active = true } = req.body;
+  const {
+    name_en,
+    name_ar,
+    description,
+    is_active = true
+  } = req.body;
 
   if (!name_en) {
     return res.status(400).json({ message: 'name_en is required' });
@@ -20,16 +25,71 @@ async function createCategory(req, res) {
 
   const result = await query(
     `
-    INSERT INTO categories (name_en, name_ar, is_active)
-    VALUES ($1, $2, $3)
+    INSERT INTO categories (name_en, name_ar, description, is_active)
+    VALUES ($1,$2,$3,$4)
     RETURNING *
     `,
-    [name_en, name_ar || null, is_active]
+    [name_en, name_ar || null, description || null, is_active]
   );
 
   return res.status(201).json(result.rows[0]);
 }
 
+async function updateCategory(req, res) {
+  const { id } = req.params;
+  const { name_en, name_ar, description, is_active } = req.body;
+
+  const fields = [];
+  const values = [];
+  let idx = 1;
+
+  const add = (field, value) => {
+    fields.push(`${field}=$${idx++}`);
+    values.push(value);
+  };
+
+  if (name_en !== undefined) add('name_en', name_en);
+  if (name_ar !== undefined) add('name_ar', name_ar);
+  if (description !== undefined) add('description', description);
+  if (is_active !== undefined) add('is_active', is_active);
+
+  if (!fields.length) {
+    return res.status(400).json({ message: 'Nothing to update' });
+  }
+
+  values.push(id);
+
+  const result = await query(
+    `
+    UPDATE categories
+    SET ${fields.join(', ')}
+    WHERE id=$${idx}
+    RETURNING *
+    `,
+    values
+  );
+
+  if (!result.rows.length) {
+    return res.status(404).json({ message: 'Category not found' });
+  }
+
+  return res.json(result.rows[0]);
+}
+
+async function deleteCategory(req, res) {
+  const { id } = req.params;
+
+  const result = await query(
+    'UPDATE categories SET is_active=false WHERE id=$1 RETURNING *',
+    [id]
+  );
+
+  if (!result.rows.length) {
+    return res.status(404).json({ message: 'Category not found' });
+  }
+
+  return res.json({ message: 'Category disabled' });
+}
 
 /* =========================
    Products
@@ -37,7 +97,7 @@ async function createCategory(req, res) {
 
 async function listProducts(req, res) {
   const products = await query(
-    'SELECT * FROM products WHERE is_available = true ORDER BY id'
+    'SELECT * FROM products WHERE is_available=true ORDER BY id'
   );
 
   const ids = products.rows.map(p => p.id);
@@ -67,7 +127,7 @@ async function getProduct(req, res) {
   const { id } = req.params;
 
   const product = await query(
-    'SELECT * FROM products WHERE id = $1',
+    'SELECT * FROM products WHERE id=$1',
     [id]
   );
 
@@ -76,7 +136,7 @@ async function getProduct(req, res) {
   }
 
   const extras = await query(
-    'SELECT * FROM product_extras WHERE product_id = $1',
+    'SELECT * FROM product_extras WHERE product_id=$1',
     [id]
   );
 
@@ -87,7 +147,7 @@ async function getProduct(req, res) {
 }
 
 /* =========================
-   Create Product (FIXED)
+   Create Product
 ========================= */
 
 async function createProduct(req, res) {
@@ -102,7 +162,7 @@ async function createProduct(req, res) {
     is_available,
     nutrition_info,
     allergens,
-    extras = [],
+    extras = []
   } = req.body;
 
   try {
@@ -132,14 +192,13 @@ async function createProduct(req, res) {
         price,
         image_url,
         is_available ?? true,
-        JSON.stringify(nutrition_info || {}), // ✅ FIX
-        JSON.stringify(allergens || [])       // ✅ FIX
+        JSON.stringify(nutrition_info || {}),
+        JSON.stringify(allergens || [])
       ]
     );
 
     const product = result.rows[0];
 
-    // Insert extras
     for (const extra of extras) {
       await query(
         `
@@ -147,17 +206,12 @@ async function createProduct(req, res) {
         (product_id, name_en, name_ar, price)
         VALUES ($1,$2,$3,$4)
         `,
-        [
-          product.id,
-          extra.name_en,
-          extra.name_ar,
-          extra.price || 0
-        ]
+        [product.id, extra.name_en, extra.name_ar, extra.price || 0]
       );
     }
 
     const extrasRows = await query(
-      'SELECT * FROM product_extras WHERE product_id = $1',
+      'SELECT * FROM product_extras WHERE product_id=$1',
       [product.id]
     );
 
@@ -194,33 +248,34 @@ async function updateProduct(req, res) {
   const values = [];
   let idx = 1;
 
-  const addField = (field, value) => {
-    fields.push(`${field} = $${idx++}`);
+  const add = (field, value) => {
+    fields.push(`${field}=$${idx++}`);
     values.push(value);
   };
 
-  if (price !== undefined) addField('price', price);
-  if (image_url !== undefined) addField('image_url', image_url);
-  if (is_available !== undefined) addField('is_available', is_available);
-  if (name_en !== undefined) addField('name_en', name_en);
-  if (name_ar !== undefined) addField('name_ar', name_ar);
-  if (description_en !== undefined) addField('description_en', description_en);
-  if (description_ar !== undefined) addField('description_ar', description_ar);
+  if (price !== undefined) add('price', price);
+  if (image_url !== undefined) add('image_url', image_url);
+  if (is_available !== undefined) add('is_available', is_available);
+  if (name_en !== undefined) add('name_en', name_en);
+  if (name_ar !== undefined) add('name_ar', name_ar);
+  if (description_en !== undefined) add('description_en', description_en);
+  if (description_ar !== undefined) add('description_ar', description_ar);
 
   if (!fields.length) {
-    return res.json({ message: 'Nothing to update' });
+    return res.status(400).json({ message: 'Nothing to update' });
   }
 
   values.push(id);
 
-  const sql = `
+  const result = await query(
+    `
     UPDATE products
     SET ${fields.join(', ')}
-    WHERE id = $${idx}
+    WHERE id=$${idx}
     RETURNING *
-  `;
-
-  const result = await query(sql, values);
+    `,
+    values
+  );
 
   if (!result.rows.length) {
     return res.status(404).json({ message: 'Product not found' });
@@ -230,14 +285,14 @@ async function updateProduct(req, res) {
 }
 
 /* =========================
-   Delete Product
+   Delete Product (Soft)
 ========================= */
 
 async function deleteProduct(req, res) {
   const { id } = req.params;
 
   const result = await query(
-    'UPDATE products SET is_available = false WHERE id = $1 RETURNING *',
+    'UPDATE products SET is_available=false WHERE id=$1 RETURNING *',
     [id]
   );
 
@@ -248,9 +303,18 @@ async function deleteProduct(req, res) {
   return res.json({ message: 'Product disabled' });
 }
 
+/* =========================
+   EXPORTS
+========================= */
+
 module.exports = {
+  // Categories
   listCategories,
   createCategory,
+  updateCategory,
+  deleteCategory,
+
+  // Products
   listProducts,
   getProduct,
   createProduct,
