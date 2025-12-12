@@ -5,109 +5,162 @@ const { query } = require('../db');
 // REGISTER (simple)
 // ---------------------------------------------
 async function register(req, res) {
-  const { name, email, password, language } = req.body;
+  try {
+    const { name, email, password, language } = req.body;
 
-  if (!email || !password || !name) {
-    return res.status(400).json({ message: 'Missing required fields' });
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: 'Missing required fields' });
+    }
+
+    const existing = await query(
+      'SELECT id FROM users WHERE email = $1',
+      [email]
+    );
+
+    if (existing.rows.length) {
+      return res.status(409).json({ message: 'Email already registered' });
+    }
+
+    const password_hash = await bcrypt.hash(password, 10);
+
+    const result = await query(
+      `
+      INSERT INTO users (name, email, password_hash, language)
+      VALUES ($1,$2,$3,$4)
+      RETURNING id, name, email, role, avatar_url, language
+      `,
+      [name, email, password_hash, language || 'en']
+    );
+
+    return res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('REGISTER ERROR:', err);
+    return res.status(500).json({ message: 'Register failed' });
   }
-
-  const existing = await query('SELECT id FROM users WHERE email=$1', [email]);
-  if (existing.rows.length) {
-    return res.status(409).json({ message: 'Email already registered' });
-  }
-
-  const password_hash = await bcrypt.hash(password, 10);
-
-  const result = await query(
-    `INSERT INTO users (name, email, password_hash, language)
-     VALUES ($1,$2,$3,$4)
-     RETURNING id, name, email, role, language, avatar_url`,
-    [name, email, password_hash, language || 'en']
-  );
-
-  const user = result.rows[0];
-
-  return res.status(201).json({
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    role: user.role,
-    avatar_url: user.avatar_url,
-    language: user.language
-  });
 }
 
 // ---------------------------------------------
 // LOGIN (simple, no tokens)
 // ---------------------------------------------
 async function login(req, res) {
-  const { email, password } = req.body;
+  try {
+    const { email, password } = req.body;
 
-  const result = await query(
-    'SELECT * FROM users WHERE email=$1 AND is_active=true',
-    [email]
-  );
+    const result = await query(
+      'SELECT * FROM users WHERE email = $1 AND is_active = true',
+      [email]
+    );
 
-  const user = result.rows[0];
+    const user = result.rows[0];
+    if (!user) {
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
 
-  if (!user) return res.status(401).json({ message: 'Invalid credentials' });
+    const ok = await bcrypt.compare(password, user.password_hash);
+    if (!ok) {
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
 
-  const ok = await bcrypt.compare(password, user.password_hash);
-  if (!ok) return res.status(401).json({ message: 'Invalid credentials' });
-
-  return res.json({
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    role: user.role,
-    avatar_url: user.avatar_url,
-    language: user.language
-  });
+    return res.json({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      avatar_url: user.avatar_url,
+      language: user.language
+    });
+  } catch (err) {
+    console.error('LOGIN ERROR:', err);
+    return res.status(500).json({ message: 'Login failed' });
+  }
 }
 
 // ---------------------------------------------
-// REFRESH — disabled but must exist for backend
+// REFRESH (not used, kept for compatibility)
 // ---------------------------------------------
 function refresh(req, res) {
-  return res.json({ message: "Refresh not used in simple auth mode" });
+  return res.json({ message: 'Refresh not used in simple auth mode' });
 }
 
 // ---------------------------------------------
-async function me(req, res) {
-  const result = await query(
-    'SELECT id, name, email, role, avatar_url, language, is_active FROM users WHERE id=$1',
-    [req.user.id]
-  );
-  return res.json(result.rows[0]);
-}
-
+// UPDATE PROFILE (NO TOKEN – FIXED)
+// ---------------------------------------------
 async function updateProfile(req, res) {
-  const { name, language, avatar_url, password } = req.body;
-  const fields = [];
-  const values = [];
-  let idx = 1;
+  try {
+    const {
+      userId,
+      name,
+      email,
+      avatarUrl,
+      language,
+      currentPassword,
+      newPassword
+    } = req.body;
 
-  if (name) { fields.push(`name=$${idx++}`); values.push(name); }
-  if (language) { fields.push(`language=$${idx++}`); values.push(language); }
-  if (avatar_url) { fields.push(`avatar_url=$${idx++}`); values.push(avatar_url); }
-  if (password) {
-    const hash = await bcrypt.hash(password, 10);
-    fields.push(`password_hash=$${idx++}`);
-    values.push(hash);
+    if (!userId) {
+      return res.status(400).json({ message: 'Missing userId' });
+    }
+
+    const userRes = await query(
+      'SELECT * FROM users WHERE id = $1',
+      [userId]
+    );
+
+    if (!userRes.rows.length) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const user = userRes.rows[0];
+    let passwordChanged = false;
+
+    // 🔐 Change password (correct & real)
+    if (currentPassword && newPassword) {
+      const ok = await bcrypt.compare(
+        currentPassword,
+        user.password_hash
+      );
+
+      if (!ok) {
+        return res.status(400).json({ message: 'invalidCurrentPassword' });
+      }
+
+      const newHash = await bcrypt.hash(newPassword, 10);
+
+      await query(
+        'UPDATE users SET password_hash = $1 WHERE id = $2',
+        [newHash, userId]
+      );
+
+      passwordChanged = true;
+    }
+
+    // ✏️ Update profile fields
+    await query(
+      `
+      UPDATE users SET
+        name = COALESCE($1, name),
+        email = COALESCE($2, email),
+        avatar_url = COALESCE($3, avatar_url),
+        language = COALESCE($4, language)
+      WHERE id = $5
+      `,
+      [name, email, avatarUrl, language, userId]
+    );
+
+    return res.json({
+      success: true,
+      passwordChanged
+    });
+
+  } catch (err) {
+    console.error('UPDATE PROFILE ERROR:', err);
+    return res.status(500).json({ message: 'profileUpdateFailed' });
   }
-
-  if (!fields.length) return res.json({ message: 'Nothing to update' });
-
-  values.push(req.user.id);
-
-  const sql = `
-    UPDATE users 
-    SET ${fields.join(', ')} 
-    WHERE id=$${idx} 
-    RETURNING id, name, email, role, avatar_url, language`;
-
-  const result = await query(sql, values);
-  return res.json(result.rows[0]);
 }
 
-module.exports = { register, login, refresh, me, updateProfile };
+module.exports = {
+  register,
+  login,
+  refresh,
+  updateProfile
+};
