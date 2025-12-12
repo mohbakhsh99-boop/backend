@@ -42,22 +42,48 @@ async function createProduct(req, res) {
     allergens,
     extras = [],
   } = req.body;
-  const result = await query(
-    'INSERT INTO products (category_id, name_en, name_ar, description_en, description_ar, price, image_url, is_available, nutrition_info, allergens) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',
-    [category_id || null, name_en, name_ar, description_en, description_ar, price, image_url, is_available ?? true, nutrition_info || {}, allergens || {}]
-  );
-  const product = result.rows[0];
-  for (const extra of extras) {
-    await query('INSERT INTO product_extras (product_id, name_en, name_ar, price) VALUES ($1,$2,$3,$4)', [
-      product.id,
-      extra.name_en,
-      extra.name_ar,
-      extra.price || 0,
-    ]);
+
+  try {
+    const result = await query(
+      `INSERT INTO products (
+        category_id, name_en, name_ar, description_en, description_ar,
+        price, image_url, is_available, nutrition_info, allergens
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      RETURNING *`,
+      [
+        category_id || null,
+        name_en,
+        name_ar,
+        description_en,
+        description_ar,
+        price,
+        image_url,
+        is_available ?? true,
+        JSON.stringify(nutrition_info || {}),   // ← مهم
+        JSON.stringify(allergens || []),        // ← مهم
+      ]
+    );
+
+    const product = result.rows[0];
+
+    for (const extra of extras) {
+      await query(
+        'INSERT INTO product_extras (product_id, name_en, name_ar, price) VALUES ($1,$2,$3,$4)',
+        [product.id, extra.name_en, extra.name_ar, extra.price || 0]
+      );
+    }
+
+    const extrasRows = await query('SELECT * FROM product_extras WHERE product_id=$1', [product.id]);
+
+    return res.status(201).json({ ...product, extras: extrasRows.rows });
+
+  } catch (err) {
+    console.error("CREATE PRODUCT ERROR →", err);
+    return res.status(400).json({ message: err.message || "Failed to create product" });
   }
-  const extrasRows = await query('SELECT * FROM product_extras WHERE product_id=$1', [product.id]);
-  return res.status(201).json({ ...product, extras: extrasRows.rows });
 }
+
 
 async function updateProduct(req, res) {
   const { id } = req.params;
