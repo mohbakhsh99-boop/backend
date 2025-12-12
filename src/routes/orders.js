@@ -5,33 +5,31 @@ const {
   getOrder,
   activeOrders,
   updateStatus,
-  rateOrder
+  rateOrder,
+  listOrders
 } = require('../controllers/ordersController');
 
 const router = express.Router();
 
-/*
-====================================
- ORDERS ROUTES (UNPROTECTED - DEV MODE)
-====================================
-*/
-
-// Create new order
+// CREATE ORDER
 router.post('/orders', createOrder);
 
-// Get my orders history (frontend يعتمد عليها)
+// LIST ALL ORDERS (Admin / Staff / Debug)
+router.get('/orders', listOrders);
+
+// USER HISTORY (optional)
 router.get('/orders/my-history', myHistory);
 
-// Get single order by ID
+// SINGLE ORDER
 router.get('/orders/:id', getOrder);
 
-// Get active orders (dashboard)
+// ACTIVE ORDERS
 router.get('/orders/active', activeOrders);
 
-// Update order status
+// UPDATE STATUS
 router.put('/orders/:id/status', updateStatus);
 
-// Rate order
+// RATE ORDER
 router.put('/orders/:id/rating', rateOrder);
 
 module.exports = router;

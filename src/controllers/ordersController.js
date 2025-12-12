@@ -228,6 +228,26 @@ async function rateOrder(req, res) {
   return res.json(result.rows[0]);
 }
 
+async function listOrders(req, res) {
+  const { user_id } = req.query;
+
+  let result;
+
+  if (user_id) {
+    result = await query(
+      'SELECT * FROM orders WHERE user_id=$1 ORDER BY created_at DESC',
+      [user_id]
+    );
+  } else {
+    result = await query(
+      'SELECT * FROM orders ORDER BY created_at DESC'
+    );
+  }
+
+  return res.json(result.rows);
+}
+
+
 module.exports = {
   createOrder,
   myHistory,
@@ -235,4 +255,5 @@ module.exports = {
   activeOrders,
   updateStatus,
   rateOrder,
+  listOrders
 };
