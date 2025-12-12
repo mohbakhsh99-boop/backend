@@ -18,17 +18,17 @@ async function listUsers(req, res) {
 ========================= */
 async function createStaff(req, res) {
   try {
-    const { name, email, password, role = 'employee' } = req.body;
+    const { name, email, password, role = 'employee', is_active = true } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({ message: 'Missing required fields' });
     }
 
-    // check email exists
     const exists = await query(
       'SELECT id FROM users WHERE email = $1',
       [email]
     );
+
     if (exists.rows.length) {
       return res.status(400).json({ message: 'Email already exists' });
     }
@@ -37,11 +37,11 @@ async function createStaff(req, res) {
 
     const result = await query(
       `
-      INSERT INTO users (name, email, password_hash, role)
-      VALUES ($1,$2,$3,$4)
+      INSERT INTO users (name, email, password_hash, role, is_active)
+      VALUES ($1,$2,$3,$4,$5)
       RETURNING id, name, email, role, is_active, created_at
       `,
-      [name, email, hash, role]
+      [name, email, hash, role, is_active]
     );
 
     return res.status(201).json(result.rows[0]);
@@ -53,43 +53,37 @@ async function createStaff(req, res) {
 }
 
 /* =========================
-   Update User (FIXED)
+   Update User
 ========================= */
 async function updateUser(req, res) {
   try {
     const { id } = req.params;
     const { name, email, password, role, is_active } = req.body;
 
-    // check user exists
-    const user = await query('SELECT * FROM users WHERE id = $1', [id]);
-    if (!user.rows.length) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    // check email uniqueness (exclude current user)
-    if (email) {
-      const emailCheck = await query(
-        'SELECT id FROM users WHERE email = $1 AND id <> $2',
-        [email, id]
-      );
-      if (emailCheck.rows.length) {
-        return res.status(400).json({ message: 'Email already exists' });
-      }
-    }
-
     const fields = [];
     const values = [];
     let idx = 1;
 
     const add = (field, value) => {
-      fields.push(`${field}=$${idx++}`);
+      fields.push(`${field} = $${idx++}`);
       values.push(value);
     };
 
     if (name !== undefined) add('name', name);
-    if (email !== undefined) add('email', email);
     if (role !== undefined) add('role', role);
     if (is_active !== undefined) add('is_active', is_active);
+
+    // email (only if provided and not empty)
+    if (email !== undefined && email !== '') {
+      const exists = await query(
+        'SELECT id FROM users WHERE email = $1 AND id <> $2',
+        [email, id]
+      );
+      if (exists.rows.length) {
+        return res.status(400).json({ message: 'Email already exists' });
+      }
+      add('email', email);
+    }
 
     // password optional
     if (password && password.trim() !== '') {
@@ -111,6 +105,11 @@ async function updateUser(req, res) {
     `;
 
     const result = await query(sql, values);
+
+    if (!result.rows.length) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
     return res.json(result.rows[0]);
 
   } catch (err) {
