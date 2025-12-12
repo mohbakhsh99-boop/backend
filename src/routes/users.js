@@ -23,13 +23,15 @@ router.get('/users', listUsers);
 router.post('/users', createStaff);
 
 // Update user by admin (role, is_active, email, password)
+// =========================
+// Customer Profile (✔️ يجب أن يكون قبل :id)
+// =========================
+router.put('/users/profile', updateProfile);
+
+// =========================
+// Admin
+// =========================
 router.put('/users/:id', updateUser);
 
-// =========================
-// Customer Profile
-// =========================
-
-// Update logged-in user profile + password
-router.put('/users/profile', updateProfile);
 
 module.exports = router;

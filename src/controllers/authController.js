@@ -85,11 +85,83 @@ function refresh(req, res) {
 // ---------------------------------------------
 // UPDATE PROFILE (NO TOKEN – FIXED)
 // ---------------------------------------------
+async function updateProfile(req, res) {
+  try {
+    const {
+      userId,
+      name,
+      email,
+      avatarUrl,
+      language,
+      currentPassword,
+      newPassword
+    } = req.body;
 
+    if (!userId) {
+      return res.status(400).json({ message: 'Missing userId' });
+    }
+
+    const userRes = await query(
+      'SELECT * FROM users WHERE id = $1',
+      [userId]
+    );
+
+    if (!userRes.rows.length) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const user = userRes.rows[0];
+    let passwordChanged = false;
+
+    // 🔐 Change password (correct & real)
+    if (currentPassword && newPassword) {
+      const ok = await bcrypt.compare(
+        currentPassword,
+        user.password_hash
+      );
+
+      if (!ok) {
+        return res.status(400).json({ message: 'invalidCurrentPassword' });
+      }
+
+      const newHash = await bcrypt.hash(newPassword, 10);
+
+      await query(
+        'UPDATE users SET password_hash = $1 WHERE id = $2',
+        [newHash, userId]
+      );
+
+      passwordChanged = true;
+    }
+
+    // ✏️ Update profile fields
+    await query(
+      `
+      UPDATE users SET
+        name = COALESCE($1, name),
+        email = COALESCE($2, email),
+        avatar_url = COALESCE($3, avatar_url),
+        language = COALESCE($4, language)
+      WHERE id = $5
+      `,
+      [name, email, avatarUrl, language, userId]
+    );
+
+    return res.json({
+      success: true,
+      passwordChanged
+    });
+
+  } 
+  catch (err) {
+    console.error('UPDATE PROFILE ERROR:', err);
+    return res.status(500).json({ message: 'profileUpdateFailed' });
+  }
+}
 
 module.exports = {
   register,
   login,
   refresh,
-
+  updateProfile
 };
