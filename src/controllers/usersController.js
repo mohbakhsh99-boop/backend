@@ -117,11 +117,19 @@ async function updateUser(req, res) {
 }
 
 /* =========================
-   Update Profile (Customer) ✅ FIXED
+   Update Profile (Customer) ✅ FINAL FIX
 ========================= */
 async function updateProfile(req, res) {
   try {
-    const { userId, name, email, avatarUrl, currentPassword, newPassword, language } = req.body;
+    const {
+      userId,
+      name,
+      email,
+      avatarUrl,
+      currentPassword,
+      newPassword,
+      language
+    } = req.body;
 
     if (!userId) {
       return res.status(400).json({ message: 'User ID required' });
@@ -148,6 +156,7 @@ async function updateProfile(req, res) {
       values.push(value);
     };
 
+    // Profile fields
     if (name !== undefined) add('name', name);
     if (avatarUrl !== undefined) add('avatar_url', avatarUrl);
     if (language !== undefined) add('language', language);
@@ -163,9 +172,16 @@ async function updateProfile(req, res) {
       add('email', email);
     }
 
-    /* 🔐 Change password */
-    if (currentPassword && newPassword) {
-      const isMatch = await bcrypt.compare(currentPassword, user.password_hash);
+    // 🔐 Password change (THIS WAS THE BUG)
+    if (currentPassword || newPassword) {
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({ message: 'Both passwords required' });
+      }
+
+      const isMatch = await bcrypt.compare(
+        currentPassword,
+        user.password_hash
+      );
 
       if (!isMatch) {
         return res.status(400).json({ message: 'invalidCurrentPassword' });
@@ -176,8 +192,13 @@ async function updateProfile(req, res) {
       passwordChanged = true;
     }
 
+    // ❗️ IMPORTANT: allow password-only update
     if (!fields.length) {
-      return res.json({ success: true, passwordChanged: false });
+      return res.json({
+        success: false,
+        passwordChanged: false,
+        message: 'Nothing to update'
+      });
     }
 
     values.push(userId);
