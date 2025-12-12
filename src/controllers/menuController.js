@@ -11,6 +11,26 @@ async function listCategories(req, res) {
   return res.json(result.rows);
 }
 
+async function createCategory(req, res) {
+  const { name_en, name_ar, is_active = true } = req.body;
+
+  if (!name_en) {
+    return res.status(400).json({ message: 'name_en is required' });
+  }
+
+  const result = await query(
+    `
+    INSERT INTO categories (name_en, name_ar, is_active)
+    VALUES ($1, $2, $3)
+    RETURNING *
+    `,
+    [name_en, name_ar || null, is_active]
+  );
+
+  return res.status(201).json(result.rows[0]);
+}
+
+
 /* =========================
    Products
 ========================= */
@@ -230,6 +250,7 @@ async function deleteProduct(req, res) {
 
 module.exports = {
   listCategories,
+  createCategory,
   listProducts,
   getProduct,
   createProduct,
