@@ -6,7 +6,10 @@ const {
   activeOrders,
   updateStatus,
   rateOrder,
-  listOrders
+  listOrders,
+  // استيراد الدوال الجديدة
+  getAllOrderItems,
+  getAllProductExtras
 } = require('../controllers/ordersController');
 
 const router = express.Router();
@@ -14,10 +17,14 @@ const router = express.Router();
 // CREATE ORDER
 router.post('/orders', createOrder);
 
-// LIST ALL ORDERS (Admin / Staff / Debug)
+// LIST ALL ORDERS
 router.get('/orders', listOrders);
 
-// USER HISTORY (optional)
+// ✅ ADD MISSING ROUTES HERE (To fix 404 errors)
+router.get('/order_items', getAllOrderItems);       // Fixes: /api/order_items 404
+router.get('/product_extras', getAllProductExtras); // Fixes: /api/product_extras 404
+
+// USER HISTORY
 router.get('/orders/my-history', myHistory);
 
 // SINGLE ORDER

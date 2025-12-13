@@ -312,6 +312,32 @@ async function listOrders(req, res) {
   return res.json(ordersWithItems);
 }
 
+/* =========================
+   NEW FUNCTIONS TO FIX 404 ERRORS
+========================= */
+
+// Fix for: /api/order_items 404
+async function getAllOrderItems(req, res) {
+  try {
+    const result = await query('SELECT * FROM order_items');
+    return res.json(result.rows);
+  } catch (err) {
+    console.error('getAllOrderItems error:', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+}
+
+// Fix for: /api/product_extras 404
+async function getAllProductExtras(req, res) {
+  try {
+    const result = await query('SELECT * FROM product_extras');
+    return res.json(result.rows);
+  } catch (err) {
+    console.error('getAllProductExtras error:', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+}
+
 module.exports = {
   createOrder,
   myHistory,
@@ -319,5 +345,8 @@ module.exports = {
   activeOrders,
   updateStatus,
   rateOrder,
-  listOrders
+  listOrders,
+  // Export new functions
+  getAllOrderItems,
+  getAllProductExtras
 };
