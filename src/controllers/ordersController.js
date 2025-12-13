@@ -17,6 +17,31 @@ async function calculateItem(product, extras = []) {
   return { extrasTotal, final };
 }
 
+// دالة مساعدة لربط العناصر بالطلبات
+// Helper function to attach items to orders efficiently
+async function attachItemsToOrders(orders) {
+  if (!orders.length) return [];
+
+  // 1. Get all Order IDs
+  const orderIds = orders.map(o => o.id);
+
+  // 2. Fetch all items belonging to these orders in one query
+  const itemsRes = await query(
+    'SELECT * FROM order_items WHERE order_id = ANY($1)',
+    [orderIds]
+  );
+  const allItems = itemsRes.rows;
+
+  // 3. Map items to their respective orders
+  return orders.map(order => {
+    return {
+      ...order,
+      // نرجع العناصر باسم 'items' كما يتوقعها الفرونت إند
+      items: allItems.filter(item => item.order_id === order.id)
+    };
+  });
+}
+
 /* =========================
    CREATE ORDER (NO AUTH)
 ========================= */
@@ -148,7 +173,7 @@ async function createOrder(req, res) {
 }
 
 /* =========================
-   READS
+   READS (UPDATED TO FETCH ITEMS)
 ========================= */
 async function myHistory(req, res) {
   const userId = toInt(req.query.userId);
@@ -156,11 +181,14 @@ async function myHistory(req, res) {
     return res.status(400).json({ message: 'Invalid user id' });
   }
 
-  const orders = await query(
+  const ordersRes = await query(
     'SELECT * FROM orders WHERE user_id=$1 ORDER BY created_at DESC',
     [userId]
   );
-  return res.json(orders.rows);
+  
+  // ✅ FIX: Attach items
+  const ordersWithItems = await attachItemsToOrders(ordersRes.rows);
+  return res.json(ordersWithItems);
 }
 
 async function getOrder(req, res) {
@@ -193,12 +221,15 @@ async function getOrder(req, res) {
 }
 
 async function activeOrders(req, res) {
-  const orders = await query(
+  const ordersRes = await query(
     `SELECT * FROM orders
      WHERE status NOT IN ('COMPLETED','REJECTED')
      ORDER BY created_at DESC`
   );
-  return res.json(orders.rows);
+  
+  // ✅ FIX: Attach items so staff can see what to prepare
+  const ordersWithItems = await attachItemsToOrders(ordersRes.rows);
+  return res.json(ordersWithItems);
 }
 
 async function updateStatus(req, res) {
@@ -275,7 +306,10 @@ async function listOrders(req, res) {
         'SELECT * FROM orders ORDER BY created_at DESC'
       );
 
-  return res.json(result.rows);
+  // ✅ FIX: Attach items so admin/dashboard can see product details
+  const ordersWithItems = await attachItemsToOrders(result.rows);
+
+  return res.json(ordersWithItems);
 }
 
 module.exports = {
