@@ -8,7 +8,7 @@ const {
   activeOrders,
   updateStatus,
   rateOrder,
-} = require('../controllers/orderController');
+} = require('../controllers/ordersController');
 
 /**
  * =========================
