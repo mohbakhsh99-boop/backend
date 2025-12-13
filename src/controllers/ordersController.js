@@ -17,27 +17,33 @@ async function calculateItem(product, extras = []) {
   return { extrasTotal, final };
 }
 
-// Helper: attach items to orders
+// دالة مساعدة لربط العناصر بالطلبات
+// Helper function to attach items to orders efficiently
 async function attachItemsToOrders(orders) {
   if (!orders.length) return [];
 
+  // 1. Get all Order IDs
   const orderIds = orders.map(o => o.id);
 
+  // 2. Fetch all items belonging to these orders in one query
   const itemsRes = await query(
     'SELECT * FROM order_items WHERE order_id = ANY($1)',
     [orderIds]
   );
-
   const allItems = itemsRes.rows;
 
-  return orders.map(order => ({
-    ...order,
-    items: allItems.filter(i => i.order_id === order.id),
-  }));
+  // 3. Map items to their respective orders
+  return orders.map(order => {
+    return {
+      ...order,
+      // نرجع العناصر باسم 'items' كما يتوقعها الفرونت إند
+      items: allItems.filter(item => item.order_id === order.id)
+    };
+  });
 }
 
 /* =========================
-   CREATE ORDER (FIXED)
+   CREATE ORDER (NO AUTH)
 ========================= */
 async function createOrder(req, res) {
   try {
@@ -55,9 +61,9 @@ async function createOrder(req, res) {
       return res.status(400).json({ message: 'Items required' });
     }
 
-    const productIds = items
-      .map(i => toInt(i.productId || i.product_id))
-      .filter(Boolean);
+    const productIds = items.map(i =>
+      toInt(i.productId || i.product_id)
+    ).filter(Boolean);
 
     if (!productIds.length) {
       return res.status(400).json({ message: 'Invalid products' });
@@ -68,7 +74,16 @@ async function createOrder(req, res) {
       [productIds]
     );
 
-    const products = productsRes.rows;
+    const extrasRes = await query(
+      'SELECT * FROM product_extras WHERE product_id = ANY($1)',
+      [productIds]
+    );
+
+    const extrasByProduct = extrasRes.rows.reduce((acc, ex) => {
+      acc[ex.product_id] = acc[ex.product_id] || [];
+      acc[ex.product_id].push(ex);
+      return acc;
+    }, {});
 
     let subtotal = 0;
     const orderItemsPayload = [];
@@ -81,29 +96,26 @@ async function createOrder(req, res) {
         return res.status(400).json({ message: 'Invalid item data' });
       }
 
-      const product = products.find(p => p.id === productId);
+      const product = productsRes.rows.find(p => p.id === productId);
       if (!product) {
         return res.status(400).json({ message: `Invalid product ${productId}` });
       }
 
-      // ✅ FIX: extras snapshot مباشرة من الفرونت
-      const extrasSnapshot = Array.isArray(item.extras_snapshot)
-        ? item.extras_snapshot
-        : Array.isArray(item.extras)
-        ? item.extras
-        : [];
+      const availableExtras = extrasByProduct[product.id] || [];
+      const selectedExtras = (item.extras || [])
+        .map(id => availableExtras.find(e => e.id === toInt(id)))
+        .filter(Boolean);
 
-      const { final } = await calculateItem(product, extrasSnapshot);
+      const { final } = await calculateItem(product, selectedExtras);
       const lineTotal = final * quantity;
       subtotal += lineTotal;
 
       orderItemsPayload.push({
         product,
+        selectedExtras,
         quantity,
-        base_price_snapshot: product.price,
-        extras_snapshot: extrasSnapshot,
-        final_price: final,
-        item_notes: item.item_notes || item.notes || null,
+        item_notes: item.notes || item.item_notes || null,
+        final,
       });
     }
 
@@ -112,8 +124,8 @@ async function createOrder(req, res) {
 
     const orderRes = await query(
       `INSERT INTO orders
-       (user_id, cashier_id, table_id, status, type, payment_method, subtotal, vat, total, note)
-       VALUES ($1,$2,$3,'PENDING_APPROVAL',$4,$5,$6,$7,$8,$9)
+        (user_id, cashier_id, table_id, status, type, payment_method, subtotal, vat, total, note)
+       VALUES ($1,$2,$3,'PENDING',$4,$5,$6,$7,$8,$9)
        RETURNING *`,
       [
         toInt(user_id),
@@ -141,9 +153,9 @@ async function createOrder(req, res) {
           item.product.id,
           item.product.name_en,
           item.quantity,
-          item.base_price_snapshot,
-          JSON.stringify(item.extras_snapshot),
-          item.final_price,
+          item.product.price,
+          JSON.stringify(item.selectedExtras),
+          item.final,
           item.item_notes,
         ]
       );
@@ -161,7 +173,7 @@ async function createOrder(req, res) {
 }
 
 /* =========================
-   READS
+   READS (UPDATED TO FETCH ITEMS)
 ========================= */
 async function myHistory(req, res) {
   const userId = toInt(req.query.userId);
@@ -173,32 +185,39 @@ async function myHistory(req, res) {
     'SELECT * FROM orders WHERE user_id=$1 ORDER BY created_at DESC',
     [userId]
   );
-
+  
+  // ✅ FIX: Attach items
   const ordersWithItems = await attachItemsToOrders(ordersRes.rows);
   return res.json(ordersWithItems);
 }
 
 async function getOrder(req, res) {
-  const orderId = toInt(req.params.id);
-  if (!orderId) {
-    return res.status(400).json({ message: 'Invalid order id' });
+  try {
+    const orderId = toInt(req.params.id);
+    if (!orderId) {
+      return res.status(400).json({ message: 'Invalid order id' });
+    }
+
+    const order = await query(
+      'SELECT * FROM orders WHERE id=$1',
+      [orderId]
+    );
+
+    if (!order.rows.length) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    const items = await query(
+      'SELECT * FROM order_items WHERE order_id=$1',
+      [orderId]
+    );
+
+    return res.json({ ...order.rows[0], items: items.rows });
+
+  } catch (err) {
+    console.error('getOrder error:', err);
+    return res.status(500).json({ message: 'Server error' });
   }
-
-  const orderRes = await query(
-    'SELECT * FROM orders WHERE id=$1',
-    [orderId]
-  );
-
-  if (!orderRes.rows.length) {
-    return res.status(404).json({ message: 'Order not found' });
-  }
-
-  const itemsRes = await query(
-    'SELECT * FROM order_items WHERE order_id=$1',
-    [orderId]
-  );
-
-  return res.json({ ...orderRes.rows[0], items: itemsRes.rows });
 }
 
 async function activeOrders(req, res) {
@@ -207,7 +226,8 @@ async function activeOrders(req, res) {
      WHERE status NOT IN ('COMPLETED','REJECTED')
      ORDER BY created_at DESC`
   );
-
+  
+  // ✅ FIX: Attach items so staff can see what to prepare
   const ordersWithItems = await attachItemsToOrders(ordersRes.rows);
   return res.json(ordersWithItems);
 }
@@ -220,14 +240,30 @@ async function updateStatus(req, res) {
     return res.status(400).json({ message: 'Invalid order id' });
   }
 
-  const result = await query(
-    `UPDATE orders
-     SET status=$1
-     WHERE id=$2
-     RETURNING *`,
-    [status, orderId]
-  );
+  const timestamps = {
+    ACCEPTED: 'accepted_at',
+    PREPARING: 'prepared_at',
+    READY: 'ready_at',
+    COMPLETED: 'completed_at',
+  };
 
+  const fields = ['status=$1'];
+  const values = [status];
+
+  if (timestamps[status]) {
+    fields.push(`${timestamps[status]}=NOW()`);
+  }
+
+  values.push(orderId);
+
+  const sql = `
+    UPDATE orders
+    SET ${fields.join(', ')}
+    WHERE id=$${values.length}
+    RETURNING *
+  `;
+
+  const result = await query(sql, values);
   if (!result.rows.length) {
     return res.status(404).json({ message: 'Order not found' });
   }
@@ -239,6 +275,10 @@ async function rateOrder(req, res) {
   const orderId = toInt(req.params.id);
   const { rating, rating_comment } = req.body;
 
+  if (!orderId) {
+    return res.status(400).json({ message: 'Invalid order id' });
+  }
+
   const result = await query(
     `UPDATE orders
      SET rating=$1, rating_comment=$2
@@ -247,7 +287,55 @@ async function rateOrder(req, res) {
     [rating, rating_comment, orderId]
   );
 
+  if (!result.rows.length) {
+    return res.status(404).json({ message: 'Order not found' });
+  }
+
   return res.json(result.rows[0]);
+}
+
+async function listOrders(req, res) {
+  const userId = toInt(req.query.user_id);
+
+  const result = userId
+    ? await query(
+        'SELECT * FROM orders WHERE user_id=$1 ORDER BY created_at DESC',
+        [userId]
+      )
+    : await query(
+        'SELECT * FROM orders ORDER BY created_at DESC'
+      );
+
+  // ✅ FIX: Attach items so admin/dashboard can see product details
+  const ordersWithItems = await attachItemsToOrders(result.rows);
+
+  return res.json(ordersWithItems);
+}
+
+/* =========================
+   NEW FUNCTIONS TO FIX 404 ERRORS
+========================= */
+
+// Fix for: /api/order_items 404
+async function getAllOrderItems(req, res) {
+  try {
+    const result = await query('SELECT * FROM order_items');
+    return res.json(result.rows);
+  } catch (err) {
+    console.error('getAllOrderItems error:', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+}
+
+// Fix for: /api/product_extras 404
+async function getAllProductExtras(req, res) {
+  try {
+    const result = await query('SELECT * FROM product_extras');
+    return res.json(result.rows);
+  } catch (err) {
+    console.error('getAllProductExtras error:', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
 }
 
 module.exports = {
@@ -257,4 +345,8 @@ module.exports = {
   activeOrders,
   updateStatus,
   rateOrder,
+  listOrders,
+  // Export new functions
+  getAllOrderItems,
+  getAllProductExtras
 };

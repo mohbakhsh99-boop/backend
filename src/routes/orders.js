@@ -1,6 +1,4 @@
 const express = require('express');
-const router = express.Router();
-
 const {
   createOrder,
   myHistory,
@@ -8,30 +6,37 @@ const {
   activeOrders,
   updateStatus,
   rateOrder,
+  listOrders,
+  // استيراد الدوال الجديدة
+  getAllOrderItems,
+  getAllProductExtras
 } = require('../controllers/ordersController');
 
-/**
- * =========================
- * Orders Routes
- * =========================
- */
+const router = express.Router();
 
-// Create new order
-router.post('/', createOrder);
+// CREATE ORDER
+router.post('/orders', createOrder);
 
-// User order history
-router.get('/my-history', myHistory);
+// LIST ALL ORDERS
+router.get('/orders', listOrders);
 
-// Active orders (for staff / kitchen)
-router.get('/active', activeOrders);
+// ✅ ADD MISSING ROUTES HERE (To fix 404 errors)
+router.get('/order_items', getAllOrderItems);       // Fixes: /api/order_items 404
+router.get('/product_extras', getAllProductExtras); // Fixes: /api/product_extras 404
 
-// Get single order by ID
-router.get('/:id', getOrder);
+// USER HISTORY
+router.get('/orders/my-history', myHistory);
 
-// Update order status
-router.put('/:id/status', updateStatus);
+// SINGLE ORDER
+router.get('/orders/:id', getOrder);
 
-// Rate completed order
-router.put('/:id/rating', rateOrder);
+// ACTIVE ORDERS
+router.get('/orders/active', activeOrders);
+
+// UPDATE STATUS
+router.put('/orders/:id/status', updateStatus);
+
+// RATE ORDER
+router.put('/orders/:id/rating', rateOrder);
 
 module.exports = router;
